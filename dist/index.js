@@ -127,6 +127,11 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.run = void 0;
 const core_1 = __webpack_require__(470);
 const token = core_1.getInput("token") || process.env.GH_PAT || process.env.GITHUB_TOKEN;
+const SECRETS_CONTEXT = process.env.SECRETS_CONTEXT || "{}";
+const allSecrets = JSON.parse(SECRETS_CONTEXT);
+Object.keys(allSecrets).forEach((key) => {
+    process.env[key] = allSecrets[key];
+});
 const run = async () => {
     if (!token)
         throw new Error("GitHub token not found");
