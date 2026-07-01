@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Generate branch name
-        uses: actions/github-script@v3
+        uses: actions/github-script@v8
         id: set-branch-name
         with:
           script: |
@@ -32,9 +32,11 @@ jobs:
             )}`;
           result-encoding: string
       - name: Set branch name
-        run: echo "PULL_REQUEST_TITLE=${{steps.set-branch-name.outputs.result}}" >> $GITHUB_ENV
+        env:
+          PULL_REQUEST_TITLE: ${{ steps.set-branch-name.outputs.result }}
+        run: printf 'PULL_REQUEST_TITLE=%s\n' "$PULL_REQUEST_TITLE" >> "$GITHUB_ENV"
       - name: Generate PR body
-        uses: actions/github-script@v3
+        uses: actions/github-script@v8
         id: set-pr-body
         with:
           script: |
@@ -45,29 +47,34 @@ jobs:
             }.`;
           result-encoding: string
       - name: Set PR body
-        run: echo "PULL_REQUEST_BODY=${{steps.set-pr-body.outputs.result}}" >> $GITHUB_ENV
+        env:
+          PULL_REQUEST_BODY: ${{ steps.set-pr-body.outputs.result }}
+        run: printf 'PULL_REQUEST_BODY=%s\n' "$PULL_REQUEST_BODY" >> "$GITHUB_ENV"
       - name: Generate PR draft
-        uses: actions/github-script@v3
+        uses: actions/github-script@v8
         id: set-pr-draft
         with:
           script: |
             return !context.payload.ref.startsWith("refs/heads/hotfix");
       - name: Set PR draft
-        run: echo "PULL_REQUEST_DRAFT=${{steps.set-pr-draft.outputs.result}}" >> $GITHUB_ENV
+        env:
+          PULL_REQUEST_DRAFT: ${{ steps.set-pr-draft.outputs.result }}
+        run: printf 'PULL_REQUEST_DRAFT=%s\n' "$PULL_REQUEST_DRAFT" >> "$GITHUB_ENV"
       - name: Determine whether to merge
-        uses: actions/github-script@v3
+        uses: actions/github-script@v8
         id: should-pr
         with:
-          github-token: ${{ secrets.GH_PAT }}
+          github-token: ${{ secrets.GH_PAT || github.token }}
           script: |
-            return
+            return (
               context.payload.ref.startsWith("refs/heads/feature") ||
               context.payload.ref.startsWith("refs/heads/hotfix") ||
-              context.payload.ref.startsWith("refs/heads/bug");
+              context.payload.ref.startsWith("refs/heads/bug")
+            );
       - name: pull-request-action
         uses: vsoch/pull-request-action@1.0.15
-        if: always() && steps.should-pr.outputs.result
+        if: steps.should-pr.outputs.result == 'true'
         env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GH_PAT || github.token }}
           PULL_REQUEST_BRANCH: "master"
           PULL_REQUEST_REVIEWERS: "AnandChowdhary"
