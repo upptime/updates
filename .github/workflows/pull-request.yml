@@ -4,6 +4,11 @@ on:
     branches-ignore:
       - master
       - production
+
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   auto-pull-request:
     name: PullRequestAction
@@ -71,10 +76,51 @@ jobs:
               context.payload.ref.startsWith("refs/heads/hotfix") ||
               context.payload.ref.startsWith("refs/heads/bug")
             );
-      - name: pull-request-action
-        uses: vsoch/pull-request-action@1.0.15
+      - name: Create pull request
+        uses: actions/github-script@v8
         if: steps.should-pr.outputs.result == 'true'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT || github.token }}
-          PULL_REQUEST_BRANCH: "master"
-          PULL_REQUEST_REVIEWERS: "AnandChowdhary"
+        with:
+          github-token: ${{ secrets.GH_PAT || github.token }}
+          script: |
+            const branch = context.payload.ref.replace("refs/heads/", "");
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const title = process.env.PULL_REQUEST_TITLE;
+            const body = process.env.PULL_REQUEST_BODY;
+            const draft = process.env.PULL_REQUEST_DRAFT === "true";
+
+            const { data: existingPulls } = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: "open",
+              head: `${owner}:${branch}`,
+              base: "master",
+            });
+
+            if (existingPulls.length > 0) {
+              core.info(`Pull request already exists: ${existingPulls[0].html_url}`);
+              return existingPulls[0].html_url;
+            }
+
+            const { data: pull } = await github.rest.pulls.create({
+              owner,
+              repo,
+              title,
+              body,
+              head: branch,
+              base: "master",
+              draft,
+            });
+
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner,
+                repo,
+                pull_number: pull.number,
+                reviewers: ["AnandChowdhary"],
+              });
+            } catch (error) {
+              core.warning(`Could not request reviewer: ${error.message}`);
+            }
+
+            return pull.html_url;
