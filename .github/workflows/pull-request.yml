@@ -4,13 +4,18 @@ on:
     branches-ignore:
       - master
       - production
+
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   auto-pull-request:
     name: PullRequestAction
     runs-on: ubuntu-latest
     steps:
       - name: Generate branch name
-        uses: actions/github-script@v3
+        uses: actions/github-script@v8
         id: set-branch-name
         with:
           script: |
@@ -32,9 +37,11 @@ jobs:
             )}`;
           result-encoding: string
       - name: Set branch name
-        run: echo "PULL_REQUEST_TITLE=${{steps.set-branch-name.outputs.result}}" >> $GITHUB_ENV
+        env:
+          PULL_REQUEST_TITLE: ${{ steps.set-branch-name.outputs.result }}
+        run: printf 'PULL_REQUEST_TITLE=%s\n' "$PULL_REQUEST_TITLE" >> "$GITHUB_ENV"
       - name: Generate PR body
-        uses: actions/github-script@v3
+        uses: actions/github-script@v8
         id: set-pr-body
         with:
           script: |
@@ -45,29 +52,75 @@ jobs:
             }.`;
           result-encoding: string
       - name: Set PR body
-        run: echo "PULL_REQUEST_BODY=${{steps.set-pr-body.outputs.result}}" >> $GITHUB_ENV
+        env:
+          PULL_REQUEST_BODY: ${{ steps.set-pr-body.outputs.result }}
+        run: printf 'PULL_REQUEST_BODY=%s\n' "$PULL_REQUEST_BODY" >> "$GITHUB_ENV"
       - name: Generate PR draft
-        uses: actions/github-script@v3
+        uses: actions/github-script@v8
         id: set-pr-draft
         with:
           script: |
             return !context.payload.ref.startsWith("refs/heads/hotfix");
       - name: Set PR draft
-        run: echo "PULL_REQUEST_DRAFT=${{steps.set-pr-draft.outputs.result}}" >> $GITHUB_ENV
+        env:
+          PULL_REQUEST_DRAFT: ${{ steps.set-pr-draft.outputs.result }}
+        run: printf 'PULL_REQUEST_DRAFT=%s\n' "$PULL_REQUEST_DRAFT" >> "$GITHUB_ENV"
       - name: Determine whether to merge
-        uses: actions/github-script@v3
+        uses: actions/github-script@v8
         id: should-pr
         with:
-          github-token: ${{ secrets.GH_PAT }}
+          github-token: ${{ secrets.GH_PAT || github.token }}
           script: |
-            return
+            return (
               context.payload.ref.startsWith("refs/heads/feature") ||
               context.payload.ref.startsWith("refs/heads/hotfix") ||
-              context.payload.ref.startsWith("refs/heads/bug");
-      - name: pull-request-action
-        uses: vsoch/pull-request-action@1.0.15
-        if: always() && steps.should-pr.outputs.result
-        env:
-          GITHUB_TOKEN: ${{ secrets.GH_PAT }}
-          PULL_REQUEST_BRANCH: "master"
-          PULL_REQUEST_REVIEWERS: "AnandChowdhary"
+              context.payload.ref.startsWith("refs/heads/bug")
+            );
+      - name: Create pull request
+        uses: actions/github-script@v8
+        if: steps.should-pr.outputs.result == 'true'
+        with:
+          github-token: ${{ secrets.GH_PAT || github.token }}
+          script: |
+            const branch = context.payload.ref.replace("refs/heads/", "");
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const title = process.env.PULL_REQUEST_TITLE;
+            const body = process.env.PULL_REQUEST_BODY;
+            const draft = process.env.PULL_REQUEST_DRAFT === "true";
+
+            const { data: existingPulls } = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: "open",
+              head: `${owner}:${branch}`,
+              base: "master",
+            });
+
+            if (existingPulls.length > 0) {
+              core.info(`Pull request already exists: ${existingPulls[0].html_url}`);
+              return existingPulls[0].html_url;
+            }
+
+            const { data: pull } = await github.rest.pulls.create({
+              owner,
+              repo,
+              title,
+              body,
+              head: branch,
+              base: "master",
+              draft,
+            });
+
+            try {
+              await github.rest.pulls.requestReviewers({
+                owner,
+                repo,
+                pull_number: pull.number,
+                reviewers: ["AnandChowdhary"],
+              });
+            } catch (error) {
+              core.warning(`Could not request reviewer: ${error.message}`);
+            }
+
+            return pull.html_url;

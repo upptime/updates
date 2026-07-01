@@ -2,17 +2,23 @@ name: Pull Request Labeler
 on:
   - pull_request
   - pull_request_review
+
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   triage:
     runs-on: ubuntu-latest
     steps:
       - name: Label all PRs
-        uses: actions/labeler@master
+        uses: actions/labeler@v6
         with:
-          repo-token: "${{ secrets.GH_PAT }}"
+          repo-token: "${{ secrets.GH_PAT || github.token }}"
       - name: Label approved PRs
+        if: github.event_name == 'pull_request_review' && github.event.review.state == 'approved'
         uses: koj-co/label-approved-action@master
         with:
           labels: "merge"
         env:
-          GITHUB_TOKEN: "${{ secrets.GH_PAT }}"
+          GITHUB_TOKEN: "${{ secrets.GH_PAT || github.token }}"
